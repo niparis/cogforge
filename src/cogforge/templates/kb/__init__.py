@@ -1,0 +1,1 @@
+"""Knowledge-base scaffold templates."""
