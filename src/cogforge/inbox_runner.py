@@ -246,6 +246,36 @@ def _stream_claude_events(
     return usage, "".join(text_parts)
 
 
+def _stream_opencode_stdout(
+    proc: "subprocess.Popen[str]",
+    patterns: list[str],
+    verbose: bool,
+) -> tuple[str, bool]:
+    """Read opencode stdout line-by-line, echo to terminal, scan for rate-limit.
+
+    Returns (accumulated_text, rate_limited_detected).
+    """
+    out_lines: list[str] = []
+    rate_limited = False
+    assert proc.stdout is not None
+    for raw in proc.stdout:
+        out_lines.append(raw)
+        sys.stdout.write(raw)
+        sys.stdout.flush()
+        if not rate_limited:
+            haystack = raw.lower()
+            if any(p.lower() in haystack for p in patterns):
+                rate_limited = True
+                if verbose:
+                    print(
+                        f"[inbox-run] rate-limit pattern detected in stdout; killing process",
+                        file=sys.stderr,
+                    )
+                proc.kill()
+                break
+    return "".join(out_lines), rate_limited
+
+
 def _invoke(
     cmd: list[str], timeout: int, verbose: bool, cwd: Path | None = None
 ) -> tuple[int, str, str, TokenUsage]:
@@ -255,8 +285,10 @@ def _invoke(
     for real-time rendering and token extraction. stderr is still captured for
     rate-limit detection.
 
-    For other CLIs (e.g. opencode): stdout is inherited (streams live),
-    stderr is captured, TokenUsage is empty (format unknown).
+    For `opencode`: stdout is piped and scanned line-by-line for rate-limit
+    patterns. Each line is echoed to the terminal immediately. If a rate-limit
+    pattern is found, the process is killed immediately and a synthetic error
+    is returned so the runner can fallback to the next agent.
 
     On timeout or missing binary, returns a synthesized non-zero exit.
     """
@@ -265,6 +297,7 @@ def _invoke(
 
     is_claude = cmd[0] == "claude"
 
+    item_usage = TokenUsage()
     try:
         if is_claude:
             # Inject --output-format stream-json before the prompt (last arg).
@@ -293,17 +326,37 @@ def _invoke(
             if timed_out:
                 return 124, "", f"timeout after {timeout}s", TokenUsage()
         else:
-            result = subprocess.run(
+            # opencode: pipe stdout so we can scan for rate-limit patterns
+            # in real time, while still echoing each line to the terminal.
+            proc = subprocess.Popen(
                 cmd,
-                stdout=None,              # inherit terminal — streams live
-                stderr=subprocess.PIPE,   # capture for rate-limit detection
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=timeout,
                 cwd=str(cwd) if cwd else None,
             )
-            rc, out_text, stderr_output, item_usage = (
-                result.returncode, "", result.stderr or "", TokenUsage()
-            )
+            timed_out = False
+            def _kill() -> None:
+                nonlocal timed_out
+                timed_out = True
+                proc.kill()
+            timer = threading.Timer(timeout, _kill)
+            timer.start()
+            try:
+                out_text, rate_limited = _stream_opencode_stdout(
+                    proc,
+                    patterns=DEFAULT_RATE_LIMIT_PATTERNS.get("opencode", []),
+                    verbose=verbose,
+                )
+                _, stderr_output = proc.communicate()
+            finally:
+                timer.cancel()
+            rc = proc.returncode
+            if timed_out:
+                return 124, out_text, f"timeout after {timeout}s", TokenUsage()
+            if rate_limited:
+                # Synthesize a non-zero exit so _detect_rate_limit fires
+                return 1, out_text, stderr_output or "rate limited", TokenUsage()
 
     except subprocess.TimeoutExpired as e:
         return 124, "", f"timeout after {timeout}s: {e}", TokenUsage()

@@ -164,14 +164,14 @@ class TestCLIInvocation:
         result = _run(["version"], wiki_root=wiki)
         assert result.returncode == 0
         data = json.loads(result.stdout)
-        assert data == {"version": "0.1.4"}
+        assert data == {"version": "0.1.5"}
 
     def test_version_command_markdown_format(self, tmp_path: Path) -> None:
         wiki = _make_wiki(tmp_path)
         result = _run(["--format", "markdown", "version"], wiki_root=wiki)
         assert result.returncode == 0
         assert "# cogforge version" in result.stdout
-        assert "**Version:** 0.1.4" in result.stdout
+        assert "**Version:** 0.1.5" in result.stdout
 
     def test_invalid_args_return_nonzero(self, tmp_path: Path) -> None:
         wiki = _make_wiki(tmp_path)
