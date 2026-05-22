@@ -9,7 +9,7 @@ import pytest
 import yaml
 
 
-def _run(args: list[str], wiki_root: Path | None = None) -> subprocess.CompletedProcess:
+def _run(args: list[str], wiki_root: Path | None = None, cwd: str | Path | None = None) -> subprocess.CompletedProcess:
     """Run cogforge CLI with given args, return completed process.
 
     Global options are placed before the subcommand per Click's requirement.
@@ -30,7 +30,10 @@ def _run(args: list[str], wiki_root: Path | None = None) -> subprocess.Completed
     # Remaining args
     remaining = [a for a in args if a not in extra_args]
     cmd.extend(remaining)
-    return subprocess.run(cmd, capture_output=True, text=True)
+    kwargs: dict[str, Any] = {"capture_output": True, "text": True}
+    if cwd is not None:
+        kwargs["cwd"] = str(cwd)
+    return subprocess.run(cmd, **kwargs)
 
 
 def _make_wiki(tmp: Path) -> Path:
@@ -74,11 +77,32 @@ class TestCLIInvocation:
         wiki = _make_wiki(tmp_path)
         # Remove sources.yaml to test missing config
         (wiki / "sources.yaml").unlink()
-        result = _run(["config", "validate"], wiki_root=wiki)
+        # Run from a directory that does NOT have a sources.yaml fallback
+        empty_cwd = tmp_path / "empty_cwd"
+        empty_cwd.mkdir()
+        result = _run(["config", "validate"], wiki_root=wiki, cwd=empty_cwd)
         assert result.returncode != 0
         data = json.loads(result.stdout)
         assert data["valid"] is False
         assert len(data["errors"]) > 0
+
+    def test_config_validate_falls_back_to_cwd_sources_yaml(self, tmp_path: Path) -> None:
+        """When sources.yaml is missing from wiki_root, fall back to CWD/sources.yaml."""
+        wiki = _make_wiki(tmp_path)
+        (wiki / "sources.yaml").unlink()
+        cwd = tmp_path / "project_root"
+        cwd.mkdir()
+        (cwd / "sources.yaml").write_text(yaml.dump({
+            "version": 1,
+            "defaults": {"output_format": "markdown"},
+            "sources": {},
+        }))
+        result = _run(["config", "show"], wiki_root=wiki, cwd=cwd)
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert data["exists"] is True
+        assert data["defaults"]["output_format"] == "markdown"
+        assert str(cwd / "sources.yaml") in data["config_path"]
 
     def test_config_validate_valid(self, tmp_path: Path) -> None:
         wiki = _make_wiki(tmp_path)
@@ -134,6 +158,20 @@ class TestCLIInvocation:
         result = _run(["--version"], wiki_root=wiki)
         assert result.returncode == 0
         assert "cogforge" in result.stdout
+
+    def test_version_command_returns_json(self, tmp_path: Path) -> None:
+        wiki = _make_wiki(tmp_path)
+        result = _run(["version"], wiki_root=wiki)
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert data == {"version": "0.1.0"}
+
+    def test_version_command_markdown_format(self, tmp_path: Path) -> None:
+        wiki = _make_wiki(tmp_path)
+        result = _run(["--format", "markdown", "version"], wiki_root=wiki)
+        assert result.returncode == 0
+        assert "# cogforge version" in result.stdout
+        assert "**Version:** 0.1.0" in result.stdout
 
     def test_invalid_args_return_nonzero(self, tmp_path: Path) -> None:
         wiki = _make_wiki(tmp_path)
