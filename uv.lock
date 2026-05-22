@@ -156,6 +156,55 @@ wheels = [
 ]
 
 [[package]]
+name = "cogforge"
+version = "0.1.1"
+source = { editable = "." }
+dependencies = [
+    { name = "beautifulsoup4" },
+    { name = "click" },
+    { name = "httpx" },
+    { name = "loguru" },
+    { name = "lxml" },
+    { name = "markdownify" },
+    { name = "openai" },
+    { name = "pandas" },
+    { name = "pymupdf" },
+    { name = "python-dotenv" },
+    { name = "python-slugify" },
+    { name = "pyyaml" },
+    { name = "tabulate" },
+    { name = "youtube-transcript-api" },
+    { name = "yt-dlp" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "beautifulsoup4", specifier = ">=4.12" },
+    { name = "click", specifier = ">=8.0" },
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "loguru", specifier = ">=0.7.3" },
+    { name = "lxml", specifier = ">=5.0" },
+    { name = "markdownify", specifier = ">=0.11.6" },
+    { name = "openai", specifier = ">=1.0" },
+    { name = "pandas", specifier = ">=2.0" },
+    { name = "pymupdf", specifier = ">=1.24" },
+    { name = "python-dotenv", specifier = ">=1.0" },
+    { name = "python-slugify", specifier = ">=8.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "tabulate", specifier = ">=0.9" },
+    { name = "youtube-transcript-api", specifier = ">=0.6.2" },
+    { name = "yt-dlp", specifier = ">=2024.1" },
+]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=9.0.3" }]
+
+[[package]]
 name = "colorama"
 version = "0.4.6"
 source = { registry = "https://pypi.org/simple" }
@@ -326,55 +375,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/ca/44/e26ede3f0caeff93f222559cb0cc4ca68579f07d009d7b6010c5b586f9b1/jiter-0.14.0-graalpy312-graalpy250_312_native-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:432c4db5255d86a259efde91e55cb4c8d18c0521d844c9e2e7efcce3899fb016", size = 343039, upload-time = "2026-04-10T14:28:38.356Z" },
     { url = "https://files.pythonhosted.org/packages/da/e9/1f9ada30cef7b05e74bb06f52127e7a724976c225f46adb65c37b1dadfb6/jiter-0.14.0-graalpy312-graalpy250_312_native-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:67f00d94b281174144d6532a04b66a12cb866cbdc47c3af3bfe2973677f9861a", size = 349613, upload-time = "2026-04-10T14:28:40.066Z" },
 ]
-
-[[package]]
-name = "cogforge"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "beautifulsoup4" },
-    { name = "click" },
-    { name = "httpx" },
-    { name = "loguru" },
-    { name = "lxml" },
-    { name = "markdownify" },
-    { name = "openai" },
-    { name = "pandas" },
-    { name = "pymupdf" },
-    { name = "python-dotenv" },
-    { name = "python-slugify" },
-    { name = "pyyaml" },
-    { name = "tabulate" },
-    { name = "youtube-transcript-api" },
-    { name = "yt-dlp" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pytest" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "beautifulsoup4", specifier = ">=4.12" },
-    { name = "click", specifier = ">=8.0" },
-    { name = "httpx", specifier = ">=0.27" },
-    { name = "loguru", specifier = ">=0.7.3" },
-    { name = "lxml", specifier = ">=5.0" },
-    { name = "markdownify", specifier = ">=0.11.6" },
-    { name = "openai", specifier = ">=1.0" },
-    { name = "pandas", specifier = ">=2.0" },
-    { name = "pymupdf", specifier = ">=1.24" },
-    { name = "python-dotenv", specifier = ">=1.0" },
-    { name = "python-slugify", specifier = ">=8.0" },
-    { name = "pyyaml", specifier = ">=6.0" },
-    { name = "tabulate", specifier = ">=0.9" },
-    { name = "youtube-transcript-api", specifier = ">=0.6.2" },
-    { name = "yt-dlp", specifier = ">=2024.1" },
-]
-
-[package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=9.0.3" }]
 
 [[package]]
 name = "loguru"
