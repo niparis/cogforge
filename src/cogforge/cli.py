@@ -168,11 +168,22 @@ class CogforgeGroup(click.Group):
         # Anything already in os.environ wins.
         dotenv_files = _load_dotenv_files(wiki_root)
 
+        resolved_config_path: Path | None = None
         if config_path:
+            resolved_config_path = config_path
             config = load_config(config_path)
         else:
             default_path = wiki_root / "sources.yaml"
-            config = load_config(default_path) if default_path.is_file() else default_config()
+            if default_path.is_file():
+                resolved_config_path = default_path
+                config = load_config(default_path)
+            else:
+                cwd_path = Path.cwd() / "sources.yaml"
+                if cwd_path.is_file():
+                    resolved_config_path = cwd_path
+                    config = load_config(cwd_path)
+                else:
+                    config = default_config()
 
         paths = Paths(wiki_root)
 
@@ -188,6 +199,7 @@ class CogforgeGroup(click.Group):
         ctx.obj["cli_ctx"] = {
             "wiki_root": wiki_root,
             "config": config,
+            "config_path": str(resolved_config_path) if resolved_config_path else None,
             "paths": paths,
             "output_format": params.get("format", "json"),
             "report_path": Path(params["report"]) if params.get("report") else None,
@@ -228,6 +240,20 @@ def global_options(func: click.Command) -> click.Command:
 @click.version_option(version=__version__, prog_name="cogforge")
 def main(**kwargs) -> None:
     """cogforge - agent-facing CLI for the LLM wiki."""
+
+
+# ── version ─────────────────────────────────────────────────────────────────
+
+@main.command("version")
+@click.pass_context
+def version_command(ctx: click.Context) -> None:
+    """Show the cogforge package version."""
+    c = _cli_ctx(ctx)
+    output_format = c.get("output_format", "json")
+    if output_format == "markdown":
+        click.echo(f"# cogforge version\n\n**Version:** {__version__}")
+    else:
+        _echo_json({"version": __version__})
 
 
 # ── init ────────────────────────────────────────────────────────────────────
@@ -430,10 +456,11 @@ def config_validate(ctx: click.Context) -> None:
     config = c["config"]
     paths = c["paths"]
     output_format = c["output_format"]
+    resolved_cfg_path = Path(c["config_path"]) if c.get("config_path") else paths.root / "sources.yaml"
 
-    errors = validate_config(config, paths.root / "sources.yaml")
-    if not (paths.root / "sources.yaml").is_file():
-        errors.append(f"Config file not found: {paths.root / 'sources.yaml'}")
+    errors = validate_config(config, resolved_cfg_path)
+    if not resolved_cfg_path.is_file():
+        errors.append(f"Config file not found: {resolved_cfg_path}")
 
     # Surface missing env vars as warnings so the user can see them at a glance
     # without breaking offline workflows that legitimately don't need them.
@@ -442,7 +469,7 @@ def config_validate(ctx: click.Context) -> None:
         warnings.append(f"{problem['field']}: {problem['hint']}")
 
     result = {
-        "config_path": str(paths.root / "sources.yaml"),
+        "config_path": str(resolved_cfg_path),
         "valid": len(errors) == 0,
         "errors": errors,
         "warnings": warnings,
@@ -483,10 +510,11 @@ def config_show(ctx: click.Context) -> None:
     c = _cli_ctx(ctx)
     cfg = c["config"]
     output_format = c["output_format"]
+    resolved_cfg_path = Path(c["config_path"]) if c.get("config_path") else c["paths"].root / "sources.yaml"
 
     result = {
-        "config_path": str(c["paths"].root / "sources.yaml"),
-        "exists": (c["paths"].root / "sources.yaml").is_file(),
+        "config_path": str(resolved_cfg_path),
+        "exists": resolved_cfg_path.is_file(),
         "version": cfg.version,
         "defaults": {
             "output_format": cfg.output_format,
