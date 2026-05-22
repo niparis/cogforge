@@ -100,12 +100,6 @@ cogforge pageindex run SOURCE_ID       # rebuild artifact for one source
 cogforge wiki validate                 # check required directories and indexes
 ```
 
-### Migration
-
-```bash
-cogforge migrate youtube-transcripts   # one-time legacy migration
-```
-
 ## Source Lifecycle
 
 Sources move through these states:
