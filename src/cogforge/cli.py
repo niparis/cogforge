@@ -264,6 +264,8 @@ def _copy_template_contents(src: Path, dst: Path, force: bool) -> list[str]:
         rel = item.relative_to(src)
         if rel.name == "__init__.py":
             continue
+        if any(part == "__pycache__" for part in rel.parts):
+            continue
         target = dst / rel
         if item.is_dir():
             target.mkdir(parents=True, exist_ok=True)
@@ -274,6 +276,42 @@ def _copy_template_contents(src: Path, dst: Path, force: bool) -> list[str]:
         shutil.copy2(item, target)
         copied.append(str(rel))
     return copied
+
+
+def _detect_installed_clis() -> list[str]:
+    """Return a list of installed agent CLI names ('claude', 'opencode')."""
+    found: list[str] = []
+    for name in ("claude", "opencode"):
+        if shutil.which(name):
+            found.append(name)
+    return found
+
+
+def _write_sources_yaml_with_agents(project_root: Path, installed_clis: list[str]) -> None:
+    """Patch the copied sources.yaml to include a detected agents block."""
+    cfg_path = project_root / "sources.yaml"
+    if not cfg_path.is_file():
+        return
+
+    data: dict[str, Any] = yaml.safe_load(cfg_path.read_text()) or {}
+
+    # Only inject if the agents list is empty (user hasn't customised yet)
+    if data.get("agents"):
+        return
+
+    agents: list[dict[str, Any]] = []
+    for cli in installed_clis:
+        entry: dict[str, Any] = {"cli": cli}
+        # Sensible defaults per CLI
+        if cli == "claude":
+            entry["timeout_seconds"] = 1800
+        elif cli == "opencode":
+            entry["rate_limit_patterns"] = ["rate_limit_error", "529", "Overloaded"]
+        agents.append(entry)
+
+    if agents:
+        data["agents"] = agents
+        cfg_path.write_text(yaml.dump(data, sort_keys=False, allow_unicode=True))
 
 
 def _ensure_wiki_indexes(wiki_root: Path, force: bool) -> list[str]:
@@ -308,6 +346,10 @@ def init_cmd(ctx: click.Context, target: Path, force: bool) -> None:
 
     with as_file(files("cogforge.templates.kb")) as template_root:
         copied = _copy_template_contents(template_root, project_root, force)
+
+    installed_clis = _detect_installed_clis()
+    if installed_clis:
+        _write_sources_yaml_with_agents(project_root, installed_clis)
 
     paths = Paths(wiki_root)
     paths.ensure()
