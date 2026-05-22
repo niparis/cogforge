@@ -1,8 +1,10 @@
-# cogforge Command Reference Draft
+# cogforge Command Reference
+
+> **Key:** 🤖 = executed by skills (agents follow skill instructions to invoke these). Commands without the badge are for operators or orchestrators.
 
 ## Conventions
 
-`cogforge` is an agent-facing CLI. Commands should be non-interactive by default.
+`cogforge` is an agent-facing CLI. Commands are non-interactive by default.
 
 Default output format:
 
@@ -30,21 +32,21 @@ Global options:
 
 ## `cogforge config`
 
-### `cogforge config validate`
+### 🤖 `cogforge config validate`
 
-Validate `llm_wiki/sources.yaml`.
+Validate `sources.yaml` and report schema errors, missing env vars, and source counts.
 
 ```bash
 cogforge config validate
 ```
 
-Output should include:
+Output includes:
 
 - Config path.
 - Schema version.
 - Source counts by connector.
 - Invalid entries.
-- Suggested fixes.
+- Missing env var warnings (e.g. `OPENROUTER_API_KEY`).
 
 ### `cogforge config show`
 
@@ -54,9 +56,7 @@ Render resolved config after defaults.
 cogforge config show
 ```
 
-Useful for agents before choosing sync commands.
-
-## `cogforge status`
+## 🤖 `cogforge status`
 
 Show pipeline status.
 
@@ -64,7 +64,7 @@ Show pipeline status.
 cogforge status
 ```
 
-Output should include:
+Output includes:
 
 - Source counts by status.
 - Source counts by connector.
@@ -83,53 +83,36 @@ Sync Substack publications.
 
 ```bash
 cogforge sync substack --source-id paperswithbacktest
+cogforge sync substack --all
 ```
 
-Options:
-
-```text
---source-id ID       Sync one configured Substack source.
---all               Sync all enabled Substack sources.
---max N             Stop after N new or updated posts.
---refresh-index     Rebuild discovered post index.
---cookies-txt PATH  Override configured cookies file.
---skip-pdfs         Do not download linked PDFs.
-```
-
-Behavior:
-
-- Writes source packages to `inbox/substack`.
-- Preserves original HTML.
-- Downloads local images.
-- Creates or updates source YAML state.
-- Emits a structured report.
+| Option | Description |
+|--------|-------------|
+| `--source-id ID` | Sync one configured source |
+| `--all` | Sync all enabled Substack sources |
+| `--max N` | Stop after N new posts |
+| `--refresh-index` | Rebuild post discovery index |
+| `--cookies-txt PATH` | Override cookies file for auth |
+| `--skip-pdfs` | Do not download linked PDFs |
+| `--force` | Re-fetch posts already on disk |
 
 ### `cogforge sync youtube`
 
-Sync YouTube playlists or fetch a single video transcript.
+Sync YouTube playlists or single videos.
 
 ```bash
 cogforge sync youtube --source-id miniature-painting
+cogforge sync youtube --url https://youtube.com/watch?v=...
 ```
 
-Options:
-
-```text
---source-id ID      Sync one configured YouTube source.
---all              Sync all enabled YouTube sources.
---url URL          Fetch a single video URL outside playlist config.
---video-id ID      Fetch a single video ID.
---max N            Stop after N new transcripts.
---include-failed   Retry previously failed items.
-```
-
-Behavior:
-
-- Fetches video metadata with `yt-dlp`.
-- Fetches transcripts with `youtube-transcript-api`.
-- Writes Markdown transcript packages to `inbox/youtube`.
-- Marks no-transcript or unavailable videos as `excluded` when appropriate.
-- Creates or updates source YAML state.
+| Option | Description |
+|--------|-------------|
+| `--source-id ID` | Sync one configured playlist |
+| `--all` | Sync all enabled YouTube sources |
+| `--url URL` | Fetch a single video URL |
+| `--video-id ID` | Fetch a single video ID |
+| `--max N` | Stop after N new transcripts |
+| `--include-failed` | Retry previously failed items |
 
 ### `cogforge sync apple-notes`
 
@@ -137,46 +120,33 @@ Export Apple Notes from configured root notes.
 
 ```bash
 cogforge sync apple-notes --source-id trading-menu
+cogforge sync apple-notes --all
 ```
 
-Options:
-
-```text
---source-id ID     Export one configured Apple Notes root.
---all             Export all enabled Apple Notes roots.
---root-title TEXT Override configured root note title.
---max-depth N     Limit graph traversal depth.
-```
-
-Behavior:
-
-- Reads Apple Notes data through the existing macOS database and AppleScript strategy.
-- Exports each note independently.
-- Copies PDF attachments.
-- Writes source packages to `inbox/apple-notes`.
-- Creates or updates source YAML state.
+| Option | Description |
+|--------|-------------|
+| `--source-id ID` | Export one configured root |
+| `--all` | Export all enabled roots |
+| `--root-title TEXT` | Override root note title |
+| `--max-depth N` | Limit graph traversal depth |
 
 ## `cogforge inbox`
 
 Inspect and manage sources waiting for LLM compilation.
 
-### `cogforge inbox list`
+### 🤖 `cogforge inbox list`
 
-List inbox sources.
+List inbox sources (pending by default).
 
 ```bash
-cogforge inbox list
+cogforge inbox list --status inbox          # default: pending only
+cogforge inbox list --status all            # all sources
+cogforge inbox list --failed                # failed only
+cogforge inbox list --connector youtube     # filter by connector
+cogforge inbox list --limit 5               # cap results
 ```
 
-Options:
-
-```text
---connector substack|youtube|apple-notes|manual
---pageindex pending|complete|failed
---failed
-```
-
-### `cogforge inbox show`
+### 🤖 `cogforge inbox show`
 
 Show one source state and package paths.
 
@@ -184,104 +154,94 @@ Show one source state and package paths.
 cogforge inbox show youtube:TIYnaNaZq4s
 ```
 
-### `cogforge inbox prepare`
+### 🤖 `cogforge inbox prepare`
 
-Prepare one or more inbox sources for LLM compilation.
-
-```bash
-cogforge inbox prepare youtube:TIYnaNaZq4s
-```
-
-Behavior:
-
-- Validates source package.
-- Detects long-document status.
-- Runs PageIndex when required unless disabled.
-- Emits paths the agent should read.
-
-Options:
-
-```text
---no-pageindex       Do not run PageIndex even if required.
---force-pageindex    Re-run PageIndex.
---char-threshold N   Override text long-document threshold.
---page-threshold N   Override page threshold.
-```
-
-### `cogforge inbox mark-processed`
-
-Record that an agent processed a source and move its package to raw.
+Prepare a source for LLM compilation. Validates the package, detects long documents, and runs PageIndex when needed. For PDF sources, also runs PDF enrichment (VLM visual summaries, table extraction).
 
 ```bash
-cogforge inbox mark-processed youtube:TIYnaNaZq4s --session SESSION_PATH
+cogforge inbox prepare youtube:VIDEO_ID
+cogforge inbox prepare substack:paperswithbacktest/2026-05-10-post --force-pageindex
 ```
 
-Options:
+| Option | Description |
+|--------|-------------|
+| `--no-pageindex` | Skip PageIndex even if required |
+| `--force-pageindex` | Re-run PageIndex |
+| `--char-threshold N` | Override character threshold |
+| `--page-threshold N` | Override page threshold |
+| `--no-pdf-enrich` | Skip PDF preprocessing |
+| `--force-pdf-enrich` | Re-run PDF enrichment |
+| `--allow-missing-vlm-key` | Proceed text-only if VLM key is missing |
 
-```text
---session PATH       Session file associated with the processing run.
---history-note TEXT  Short reason for history log.
---contribution PATH  Optional LLM-generated contribution report.
+### 🤖 `cogforge inbox mark-processed`
+
+Record that an agent processed a source and move its package from `inbox/` to `raw/`.
+
+```bash
+cogforge inbox mark-processed youtube:TIYnaNaZq4s --history-note "Added trading concepts"
 ```
 
-Behavior:
-
-- Moves source package from inbox to raw.
-- Updates source state to `processed`.
-- Appends history log entry.
-- Updates or references session bookkeeping.
-
-The command name is draft. Alternatives include `archive`, `accept`, or `promote`.
+| Option | Description |
+|--------|-------------|
+| `--session PATH` | Associate with a session file |
+| `--history-note TEXT` | Short reason for history log |
 
 ### `cogforge inbox exclude`
 
-Exclude a source from the pipeline.
+Exclude a source from the pipeline with a reason.
 
 ```bash
-cogforge inbox exclude youtube:VIDEO_ID --reason unavailable
+cogforge inbox exclude youtube:VIDEO_ID --reason irrelevant
 ```
 
-Reasons:
+Reasons: `duplicate`, `irrelevant`, `unavailable`, `user_rejected`, `unsupported`.
 
-```text
-duplicate
-irrelevant
-unavailable
-user_rejected
-unsupported
+### `cogforge inbox run`
+
+Drain the inbox by spawning external agent sessions, one item at a time. Uses the `agents:` fallback list from `sources.yaml`. Each iteration spawns a fresh `claude` or `opencode` subprocess that processes exactly one source. If an agent hits a rate limit, the runner advances to the next agent and retries.
+
+```bash
+cogforge inbox run --max-items 5 --delay 2.0
 ```
+
+| Option | Description |
+|--------|-------------|
+| `--max-items N` | Stop after N items |
+| `--delay SECONDS` | Sleep between items |
+| `--cli claude\|opencode` | Restrict to one CLI |
 
 ## `cogforge pageindex`
 
-Manage PageIndex artifacts.
+Manage PageIndex artifacts for long documents.
+
+> **Note:** `inbox prepare` calls `pageindex run` internally when a source exceeds length thresholds. Skills use `pageindex show` to read structured artifacts. The `pageindex` CLI commands are exposed for manual use and debugging.
 
 ### `cogforge pageindex detect`
 
-Detect whether sources require PageIndex.
+Detect whether sources require PageIndex based on document length. Without `SOURCE_ID`, scans all sources.
 
 ```bash
-cogforge pageindex detect youtube:TIYnaNaZq4s
+cogforge pageindex detect
+cogforge pageindex detect youtube:VIDEO_ID
 ```
 
 ### `cogforge pageindex run`
 
-Run PageIndex for one source.
+Run PageIndex for one source, producing a structured document tree artifact.
 
 ```bash
-cogforge pageindex run substack:paperswithbacktest/2026-05-10-jim-simons-the-mathematician-who
+cogforge pageindex run SOURCE_ID --force
 ```
 
-Options:
+| Option | Description |
+|--------|-------------|
+| `--force` | Re-run even when artifacts exist |
+| `--char-threshold N` | Override threshold |
+| `--page-threshold N` | Override threshold |
 
-```text
---force             Re-run even when artifacts exist.
---page-threshold N  Override page threshold.
---char-threshold N  Override character threshold.
-```
+### 🤖 `cogforge pageindex show`
 
-### `cogforge pageindex show`
-
-Show artifact paths and summary metadata for one source.
+Show PageIndex artifact paths and summary metadata for one source.
 
 ```bash
 cogforge pageindex show SOURCE_ID
@@ -291,97 +251,88 @@ cogforge pageindex show SOURCE_ID
 
 Inspect and repair source state files.
 
-### `cogforge state show`
+### 🤖 `cogforge state show`
 
-Show source state.
+Show source state for one source, or list all source IDs if omitted.
 
 ```bash
-cogforge state show SOURCE_ID
+cogforge state show youtube:TIYnaNaZq4s
+cogforge state show                           # list all IDs
 ```
 
-### `cogforge state validate`
+### 🤖 `cogforge state validate`
 
-Validate source state consistency.
+Validate all source state files for consistency: duplicate IDs, invalid statuses, missing paths.
 
 ```bash
 cogforge state validate
 ```
 
-Checks:
+### 🤖 `cogforge state repair`
 
-- Duplicate source IDs.
-- Missing source package paths.
-- Missing PageIndex artifacts.
-- Impossible lifecycle/path combinations.
-- Invalid status values.
-
-### `cogforge state repair`
-
-Repair safe state drift.
+Repair safe state drift: recompute missing hashes, restore missing references.
 
 ```bash
 cogforge state repair --dry-run
+cogforge state repair
 ```
-
-Potential safe repairs:
-
-- Recompute missing hashes.
-- Restore missing report references.
-- Mark missing package paths as validation errors.
-
-No destructive repair should run without explicit flags.
 
 ## `cogforge wiki`
 
-Deterministic wiki bookkeeping helpers. These commands do not perform semantic compilation.
+Deterministic wiki bookkeeping helpers.
 
-### `cogforge wiki log`
+### 🤖 `cogforge wiki log`
 
-Append a history log entry.
+Append a timestamped entry to `history/YYYY-MM-DD.log`.
 
 ```bash
-cogforge wiki log --message "Processed source youtube:TIYnaNaZq4s" --session PATH
+cogforge wiki log --message "Processed source youtube:VIDEO_ID"
 ```
 
-### `cogforge wiki session close`
+### 🤖 `cogforge wiki session-new`
 
-Create or update a session file from a structured report.
+Create a session YAML for tracking agent work.
 
 ```bash
-cogforge wiki session close --report PATH
+cogforge wiki session-new \
+  --summary "Processed trading sources" \
+  --domain trading \
+  --files-changed "wiki/concepts/momentum.md,wiki/decisions/backtesting.md" \
+  --decisions "Use RSI framework,Adopt walk-forward testing" \
+  --next-steps "Implement portfolio constraints,Write synthesis"
+```
+
+### `cogforge wiki session-close`
+
+Create a session from a structured run report.
+
+```bash
+cogforge wiki session-close --report PATH
 ```
 
 ### `cogforge wiki validate`
 
-Validate wiki structure.
+Validate wiki structure: required directories and index files.
 
 ```bash
 cogforge wiki validate
 ```
 
-Initial checks:
-
-- Required folders.
-- Index files.
-- Broken wikilinks.
-- Missing indexed pages.
-- Source state path consistency.
-
 ## `cogforge reports`
 
 Inspect canonical run reports.
 
-### `cogforge reports list`
+### 🤖 `cogforge reports list`
 
-List recent reports.
+List recent run reports from `.llmkb/reports/`.
 
 ```bash
 cogforge reports list
 ```
 
-### `cogforge reports show`
+### 🤖 `cogforge reports show`
 
-Show a report.
+Show a stored report by run ID.
 
 ```bash
 cogforge reports show RUN_ID --format markdown
@@ -395,31 +346,47 @@ Render a stored YAML report to JSON or Markdown.
 cogforge reports render PATH --format markdown
 ```
 
-## Draft Exit Codes
+## `cogforge migrate`
 
-```text
-0 success
-1 command error or invalid arguments
-2 validation failed
-3 partial success with failed source items
-4 external dependency failure
-5 state conflict
-```
+One-time data migration utilities.
 
-## Agent Usage Pattern
+### `cogforge migrate youtube-transcripts`
 
-A typical agent workflow:
+Migrate legacy `raw/transcripts/*.md` files to the new source-state model.
 
 ```bash
-cogforge sync youtube --source-id miniature-painting
-cogforge inbox list
-cogforge inbox prepare youtube:VIDEO_ID
+cogforge migrate youtube-transcripts
 ```
 
-The agent then reads the source package and PageIndex artifacts, updates wiki pages itself, then calls:
+## Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success |
+| 1 | Command error or invalid arguments |
+| 2 | Validation failed |
+| 3 | Partial success (some sources failed) |
+
+## Typical Agent Workflow
+
+An agent processes one source end-to-end:
 
 ```bash
-cogforge inbox mark-processed youtube:VIDEO_ID --session llm_wiki/history/sessions/...
+cogforge status                                   # overview
+cogforge inbox list --limit 1                     # next pending source
+cogforge inbox show <source_id>                   # inspect source
+cogforge inbox prepare <source_id>                # enrich + pageindex
+cogforge pageindex show <source_id>               # read structured artifact
+# (agent reads source and edits wiki pages)
+cogforge inbox mark-processed <source_id> --history-note "Added concepts"
+cogforge wiki session-new --summary "..." --files-changed "..."
+cogforge wiki log --message "Processed <source_id>"
 ```
 
-The CLI handles deterministic bookkeeping. The LLM handles semantic compilation and contradiction reporting.
+Or drain the inbox automatically:
+
+```bash
+cogforge inbox run --max-items 5
+```
+
+The CLI handles deterministic bookkeeping. The LLM handles semantic compilation.
