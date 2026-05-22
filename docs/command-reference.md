@@ -346,18 +346,6 @@ Render a stored YAML report to JSON or Markdown.
 cogforge reports render PATH --format markdown
 ```
 
-## `cogforge migrate`
-
-One-time data migration utilities.
-
-### `cogforge migrate youtube-transcripts`
-
-Migrate legacy `raw/transcripts/*.md` files to the new source-state model.
-
-```bash
-cogforge migrate youtube-transcripts
-```
-
 ## Exit Codes
 
 | Code | Meaning |
