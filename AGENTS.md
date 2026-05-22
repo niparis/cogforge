@@ -2,13 +2,11 @@
 
 You are working on Cogforge, the CLI/tooling repository.
 
-Cogforge is code, not a knowledge base. Do not apply knowledge-base agent instructions from a managed wiki repository while editing this repo.
+Cogforge is code, not a knowledge base. 
 
 ## Boundaries
 
 - Product, architecture, packaging, and migration decisions belong in this repository, not in a user's `llm_wiki/wiki/decisions`.
-- Knowledge-base sessions, domain context, inbox processing logs, and wiki bookkeeping belong only to the managed KB repository.
-- Do not write to a managed KB unless the user explicitly asks you to operate on that KB.
 - Do not run `cogforge wiki session-new` or `cogforge wiki log` merely because you changed Cogforge code.
 
 ## Project Shape
@@ -18,7 +16,6 @@ Cogforge is code, not a knowledge base. Do not apply knowledge-base agent instru
 - Tests: `tests`
 - Documentation: `docs`
 
-The managed wiki data layout may still contain `.llmkb` for backward compatibility. Treat that as a KB schema detail, not as the package name.
 
 ## Common Commands
 
@@ -28,10 +25,18 @@ uv run cogforge --help
 uv run cogforge status --wiki-root /path/to/llm_wiki
 ```
 
-## Migration Rule
+## Release Workflow
 
-Keep the tool repo and KB repos strictly separate:
+- **Version source of truth**: `pyproject.toml` (`version = "x.y.z"`).
+- **Tag convention**: `v` prefix, e.g. `v0.1.0`.
+- **Auto-draft on tag push**: Pushing any `v*` tag triggers `.github/workflows/auto-draft-release.yaml`, which creates a draft release with auto-generated notes.
+- **Trigger**: Publishing the draft release (not a bare git tag push) fires `.github/workflows/publish.yaml`.
+- **What it does**: Checks out the release tag, runs `uv build`, then `uv publish` to PyPI via OIDC trusted publishing.
+- **To release**:
+  1. Ensure `pyproject.toml` version is bumped.
+  2. Commit the version bump.
+  3. Create and push an annotated tag: `git tag -a vX.Y.Z -m "Release vX.Y.Z" && git push origin vX.Y.Z`
+  4. The draft release appears automatically on GitHub.
+  5. Go to GitHub → Releases, open the draft, review the notes, and click **Publish release**.
 
-- `cogforge/AGENTS.md` tells agents how to code the tool.
-- The KB `AGENTS.md` tells agents how to maintain that KB.
-- The KB `AGENTS.md` template lives in Cogforge only as generated user-facing project scaffolding.
+
