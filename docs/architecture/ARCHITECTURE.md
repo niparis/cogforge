@@ -2,11 +2,104 @@
 
 ## Architecture Goal
 
-`cogforge` should become the deterministic execution layer for the LLM wiki. It should expose stable commands and schemas that an LLM agent can call to synchronize sources, prepare long documents, track source lifecycle, update logs, and validate structure.
+`cogforge` is a three-layer system that combines a deterministic CLI engine (v1), a conversational interface (v1.5), and a full knowledge workbench (v2). The architecture must support all three tiers without requiring rewrites between tiers.
 
-The first architecture should be simple enough to implement inside the current repository, but clean enough to separate into its own package later.
+The first deliverable is a CLI engine that exposes stable commands and schemas for source synchronization, long-document preparation, state tracking, reporting, and agent skill management. This engine must be architected so that its core capabilities can be extracted into a shared library consumed by both the CLI and future interfaces.
 
-## Package Layout
+## System Architecture
+
+Cogforge is organized into three logical layers. See [ADR-001](adr-001-layered-architecture.md).
+
+```
+Knowledge Layer        (concepts, sources, wiki content, relationships, decisions)
+        ↓
+Observability Layer    (runs, reports, logs, events, state, provenance)
+        ↓
+Interaction Layer      (CLI, conversational interface, dashboard, API)
+```
+
+The conversational interface sits at the Interaction Layer and must have access to both Knowledge and Observability data. This enables users to ask knowledge questions, provenance questions, operational questions, and governance questions through the same interface.
+
+Layers are logical in v1 (enforced through module boundaries within a single package) and become physically separate as complexity warrants.
+
+### Service Boundaries
+
+Three service families emerge from the layered architecture:
+
+**Knowledge Access** — concepts, wiki content, source metadata, concept relationships, decisions.
+
+**Observability** — run reports, processing logs, state transitions, events, source preparation metadata (PageIndex artifacts, enrichment manifests).
+
+**Governance** — cases, decisions, reviews, contradiction tracking.
+
+The conversational system and dashboard are consumers of all three service families.
+
+## Conversational Architecture
+
+### Chat as Orchestrator
+
+The chat system is not a simple RAG endpoint. It is an orchestrator with access to multiple tool domains:
+
+- Concept search and concept relationship traversal.
+- Source search and source metadata inspection.
+- PageIndex document tree navigation.
+- Run and report inspection.
+- Case and decision inspection and update.
+- Knowledge graph exploration.
+
+The conversational agent must be capable of switching between these domains dynamically within a single session. It must also produce durable artifacts: decisions, case updates, concept updates, and processing actions are persisted as structured records, not transient chat messages.
+
+### Query Model
+
+Internally, user questions are classified into four categories matching the product's query types:
+
+- **Knowledge** — "What is PageIndex?"
+- **Meta-Knowledge** — "What documents were added this week?"
+- **Provenance** — "Why was this source not used in the answer?"
+- **Governance** — "Should these contradictory claims be reconciled?"
+
+The backend exposes APIs that support all four categories. The conversational agent selects tools and strategies based on query classification.
+
+### Knowledge Provenance
+
+Every answer produced by the conversational system must maintain references to:
+
+- Concepts used.
+- Source documents consulted.
+- Decisions that influenced the reasoning.
+- Contradictions encountered during generation.
+
+This enables conversational provenance inspection — users can drill into answers interactively to understand the reasoning path.
+
+## Event Architecture
+
+Cogforge uses structured events in two domains. See [ADR-002](adr-002-event-architecture.md).
+
+**Operational events** describe CLI activity: `sync_started`, `sync_completed`, `pageindex_failed`, `source_marked_processed`, `source_excluded`, etc.
+
+**Knowledge events** describe knowledge evolution: `concept_created`, `concept_modified`, `contradiction_detected`, `decision_recorded`, `case_opened`, `case_closed`, etc.
+
+Events are the canonical record of activity. Both dashboards and conversational agents consume the same event stream for operational and knowledge introspection.
+
+## Architectural Evolution
+
+The long-term architecture extracts a shared `CogForge Core` library from the CLI. See [ADR-003](adr-003-core-extraction.md).
+
+```
+Phase 1 (v1):  All logic in src/cogforge/, layers enforced via module boundaries.
+Phase 2 (v1.5): src/cogforge/core/ extracted. CLI and conversational interface both consume core.
+Phase 3 (v2):  Complete extraction. New server/ package for HTTP/API. Dashboard and web UI consume server.
+```
+
+The CLI is never deprecated. It remains the primary agent interface and the authoritative tool surface for deterministic operations. The conversational interface remains independent of whether operations originate from the CLI or a web application.
+
+---
+
+## CLI Engine Architecture
+
+The following sections describe the deterministic CLI engine — the initial implementation surface for v1.
+
+### Package Layout
 
 Use a repo-level `src` folder.
 
@@ -143,7 +236,10 @@ llm_wiki/raw/<connector>/<source-package>
 llm_wiki/pageindex/<connector>/<source-id>/
 llm_wiki/.llmkb/state/sources/<source-id>.yaml
 llm_wiki/.llmkb/reports/<run-id>.yaml
+llm_wiki/.llmkb/enrichment/<connector>/<source-id>/
 ```
+
+The enrichment path holds per-source PDF enrichment artifacts (manifest, extracted pages, tables, visual summaries, enriched Markdown). See the PDF Enrichment Pipeline section.
 
 The implementation should be able to read old folder layouts during migration.
 
@@ -253,7 +349,7 @@ excluded:
 
 ## PageIndex Integration
 
-PageIndex should run for all long documents, regardless of connector.
+PageIndex should run for all long documents, regardless of connector. For PDF documents, PageIndex operates on the output of the PDF enrichment pipeline (see below), not on the raw PDF itself.
 
 Long-document detection:
 
@@ -279,6 +375,60 @@ metadata.yaml
 The CLI should record artifact paths in the source state file.
 
 PageIndex errors should not erase usable source packages. They should update `pageindex.status: failed` and return a report item requiring action.
+
+### LLM Boundary
+
+The CLI may call LLMs for two purposes that are not semantic wiki compilation:
+
+1. **Document structuring** (PageIndex) — creating hierarchical document trees for navigation.
+2. **Visual content extraction** (VLM summaries in PDF enrichment) — converting diagram/chart/table visual content into structured text for indexing.
+
+The CLI must not call LLMs for concept synthesis, decision writing, contradiction detection, or any other semantic wiki compilation task.
+
+## PDF Enrichment Pipeline
+
+Before a PDF source reaches PageIndex, it passes through an enrichment pipeline that converts visual and tabular content into structured text. This makes PageIndex more useful on complex PDFs.
+
+Pipeline:
+
+```text
+Native PDF
+  → PyMuPDF page extraction
+  → Page classifier (TEXT_ONLY | TABLE_PAGE | VISUAL_PAGE | LOW_TEXT_VISUAL_PAGE)
+  → Enriched Markdown builder
+  → PageIndex input
+```
+
+The pipeline produces:
+
+```text
+llm_wiki/.llmkb/enrichment/<connector>/<source-id>/
+  manifest.json
+  summary.md
+  pages/
+    page-001.text.md
+  tables/
+    page-005-table-001.csv
+    page-005-table-001.md
+  visuals/
+    page-009.png
+    page-009.visual.md
+  enriched/
+    <source-id>.enriched.md
+```
+
+The enriched Markdown file is the PageIndex input. It contains extracted page text, extracted tables in Markdown, VLM summaries for visually important pages, and page-level provenance.
+
+The manifest records per-page routing decisions, visual signal metrics, and VLM call outcomes. It is for debugging and downstream audit.
+
+Page routes:
+
+- **TEXT_ONLY**: Enough extractable text, no strong visual signal. No VLM.
+- **TABLE_PAGE**: One or more detected tables. Extract to CSV and Markdown. No VLM unless also a visual page.
+- **VISUAL_PAGE**: Significant visual signal (images, drawings, visual hints). Render to PNG, call VLM for summary.
+- **LOW_TEXT_VISUAL_PAGE**: Little extractable text but significant visual content. Render to PNG, call VLM.
+
+The pipeline is page-fault tolerant. Text extraction, table extraction, rendering, or VLM failures on individual pages do not fail the whole document. Errors are recorded in the manifest and placeholders are inserted in the enriched Markdown.
 
 ## Report Schema
 
@@ -408,6 +558,30 @@ For example, a future inbox-processing skill should:
 5. Call CLI bookkeeping commands to log, update session, and mark source processed.
 6. Report source contributions and contradictions to the user.
 
+## Inbox Processing Orchestration
+
+`cogforge inbox run` is the deterministic orchestrator. It does not trust spawned agents to perform preparation steps.
+
+Flow per source:
+
+1. Select next inbox source (`cogforge inbox list --limit 1`).
+2. Run `prepare_inbox_source()` internally — package validation, PDF enrichment, long-document detection, PageIndex.
+3. If prepare fails, log and skip to next source.
+4. Spawn agent with prompt: *"The source has been pre-validated and prepared. Read it and compile it into the wiki."*
+5. Agent calls `mark-processed` and `wiki log`.
+6. Verify inbox count decreased.
+
+This means agents never call `inbox prepare` themselves. The CLI passes preparation metadata (estimated chars, PageIndex required, artifact paths) to the agent in the prompt or report so the agent can consume it without needing to discover it.
+
+## Source-by-Source Processing
+
+Inbox sources are processed one at a time in isolated agent contexts.
+
+- Each source gets a fresh subagent with no prior context from previous sources.
+- This prevents context pollution (opinions from article A affecting reading of article B).
+- Error isolation: one bad source does not crash the batch.
+- Future optimization: subagents could be spawned in parallel batches.
+
 ## Structural Validation
 
 Validation should be command-based and agent-friendly.
@@ -447,6 +621,15 @@ The implementation plan will come later, but the architecture should anticipate 
 
 Do not preserve wrappers as a long-term architecture requirement.
 
+## Test Strategy
+
+- Unit-test state encoding, YAML round-trip, config loading, and report rendering.
+- Snapshot-test JSON output for key commands.
+- Use fixture source packages for connector-independent behavior.
+- Use mocked external calls for Substack, YouTube, Apple Notes, PageIndex, and VLM in tests.
+- Add at least one end-to-end dry-run test per connector.
+- Test the prepare pipeline with both short and long document fixtures.
+
 ## Architecture Risks
 
 - State/folder drift if commands bypass the state model.
@@ -456,6 +639,9 @@ Do not preserve wrappers as a long-term architecture requirement.
 - PageIndex artifacts becoming opaque without clear source IDs and paths.
 - Apple Notes macOS permissions and database changes.
 - External-source sync failures from auth, rate limits, or unavailable transcripts.
+- Event model drift if operational and knowledge events diverge in schema or semantics (see ADR-002).
+- Core extraction scope creep — extracting too much too early creates unnecessary indirection; extracting too late creates a painful refactoring (see ADR-003).
+- Conversational agent capability boundaries — the orchestrator model requires the agent to switch tools correctly; incorrect tool selection degrades the experience silently.
 
 ## Logging Standards
 
@@ -506,7 +692,7 @@ Every sync command must emit at minimum:
 
 ## Design Principles
 
-- Agent-first, not human-first.
+- Agent-first for CLI design, human-first for conversational interface design.
 - YAML for persisted state.
 - JSON for default command output.
 - Markdown as rendering, not separate truth.
@@ -514,4 +700,8 @@ Every sync command must emit at minimum:
 - Source lifecycle is separate from wiki element lifecycle.
 - PageIndex state is metadata, not lifecycle.
 - Folder layout is readable but not canonical.
-- Semantic judgment stays with the LLM until the workflow is proven.
+- Semantic judgment stays with the LLM until proven otherwise.
+- Observability data is queryable, not dashboard-only. Both visual and conversational consumers access the same APIs.
+- Every conversational answer carries provenance references to concepts, sources, decisions, and contradictions.
+- Conversation is an orchestrator over multiple tool domains, not a single RAG endpoint.
+- CLI and future interfaces share core APIs through progressive extraction (see ADR-003).

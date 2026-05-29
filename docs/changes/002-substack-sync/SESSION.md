@@ -2,7 +2,7 @@
 
 ## Summary
 
-Completed Sprint 2 from `docs/sprints/initial-implementation-plan.md`: Substation connector migration.
+Completed Sprint 2 from `docs/changes/000-foundation/PLAN.md`: Substation connector migration.
 
 ## What Was Done
 

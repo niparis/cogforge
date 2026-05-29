@@ -6,9 +6,9 @@ Replace all manual bookkeeping in the agent skill definitions with `cogforge` CL
 
 References:
 
-- [Product specification](../product.md)
-- [Command reference](../command-reference.md)
-- [AGENTS.md](../../AGENTS.md)
+- [Product specification](../../specs/PRODUCT.md)
+- [Command reference](../../architecture/command-reference.md)
+- [AGENTS.md](../../../AGENTS.md)
 - Skills: `.opencode/skills/*/SKILL.md`
 
 ## Context

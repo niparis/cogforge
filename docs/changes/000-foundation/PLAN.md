@@ -6,9 +6,9 @@ This plan turns the initial `cogforge` product, architecture, and command-refere
 
 References:
 
-- [Product specification](../product.md)
-- [Technical architecture](../architecture.md)
-- [Command reference](../command-reference.md)
+- [Product specification](../../specs/PRODUCT.md)
+- [Technical architecture](../../architecture/ARCHITECTURE.md)
+- [Command reference](../../architecture/command-reference.md)
 
 The goal is to build the deterministic agent-facing CLI in slices, starting with the package skeleton, schemas, and state/report foundations, then migrating source connectors one at a time.
 
@@ -316,7 +316,7 @@ The new CLI is the documented way for agents to sync, prepare, and finalize sour
 
 When implementation begins, update docs as behavior becomes real:
 
-- Keep [command-reference.md](../command-reference.md) aligned with implemented commands.
+- Keep [command-reference.md](../../architecture/command-reference.md) aligned with implemented commands.
 - Add examples of agent workflows.
 - Add migration notes after the first connector is migrated.
 - Record any intentional deviations from the architecture spec.

@@ -9,9 +9,9 @@ Make `cogforge inbox run` fully deterministic and auditable by:
 
 References:
 
-- [Product specification](../product.md)
-- [Command reference](../command-reference.md)
-- [AGENTS.md](../../AGENTS.md)
+- [Product specification](../../specs/PRODUCT.md)
+- [Command reference](../../architecture/command-reference.md)
+- [AGENTS.md](../../../AGENTS.md)
 
 ## Context
 
