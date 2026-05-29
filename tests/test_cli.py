@@ -164,14 +164,14 @@ class TestCLIInvocation:
         result = _run(["version"], wiki_root=wiki)
         assert result.returncode == 0
         data = json.loads(result.stdout)
-        assert data == {"version": "0.1.7"}
+        assert data == {"version": "0.1.8"}
 
     def test_version_command_markdown_format(self, tmp_path: Path) -> None:
         wiki = _make_wiki(tmp_path)
         result = _run(["--format", "markdown", "version"], wiki_root=wiki)
         assert result.returncode == 0
         assert "# cogforge version" in result.stdout
-        assert "**Version:** 0.1.7" in result.stdout
+        assert "**Version:** 0.1.8" in result.stdout
 
     def test_invalid_args_return_nonzero(self, tmp_path: Path) -> None:
         wiki = _make_wiki(tmp_path)
@@ -822,3 +822,40 @@ class TestSkillsSync:
             for name in _CANONICAL_SKILL_NAMES:
                 skill_file = root / name / "SKILL.md"
                 assert skill_file.exists(), f"Missing canonical skill: {name}"
+
+    def test_obsolete_youtube_transcript_removed(self, tmp_path: Path) -> None:
+        """Obsolete youtube-transcript skill should be deleted during sync."""
+        wiki = _make_wiki(tmp_path)
+        # Create an obsolete skill directory as if from an older version
+        obsolete = wiki.parent / ".opencode" / "skills" / "youtube-transcript"
+        obsolete.mkdir(parents=True)
+        (obsolete / "SKILL.md").write_text("old content")
+        _run(["skills"], wiki_root=wiki)
+        assert not obsolete.exists()
+
+    def test_obsolete_youtube_transcript_detected_by_check(self, tmp_path: Path) -> None:
+        """--check should report obsolete youtube-transcript as stale."""
+        wiki = _make_wiki(tmp_path)
+        obsolete = wiki.parent / ".opencode" / "skills" / "youtube-transcript"
+        obsolete.mkdir(parents=True)
+        (obsolete / "SKILL.md").write_text("old content")
+        result = _run(["skills", "--check"], wiki_root=wiki)
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert data["ok"] is False
+        stale_names = {s["name"] for s in data["stale"]}
+        assert "youtube-transcript" in stale_names
+
+    def test_dry_run_reports_obsolete_removal(self, tmp_path: Path) -> None:
+        """--dry-run should report obsolete removal without deleting."""
+        wiki = _make_wiki(tmp_path)
+        obsolete = wiki.parent / ".opencode" / "skills" / "youtube-transcript"
+        obsolete.mkdir(parents=True)
+        (obsolete / "SKILL.md").write_text("old content")
+        result = _run(["skills", "--dry-run"], wiki_root=wiki)
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        removed = [r["name"] for r in data.get("removed", [])]
+        assert "youtube-transcript" in removed
+        # Verify file still exists after dry-run
+        assert obsolete.exists()
