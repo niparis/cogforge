@@ -63,9 +63,9 @@ This is manageable now, but will become harder as sources, skills, and processin
 1. Sources are synchronized or imported.
 2. Source packages land in `llm_wiki/inbox`.
 3. A source state file records lifecycle, identity, paths, hashes, and processing metadata.
-4. Long documents are indexed with PageIndex when configured thresholds are met.
-5. The LLM agent compiles source material into wiki pages.
-6. The CLI records logs/session bookkeeping and moves processed sources to `llm_wiki/raw`.
+4. Before an agent session is spawned, `cogforge inbox run` prepares the selected source deterministically: package validation, PDF enrichment when applicable, long-document detection, and PageIndex execution when thresholds are met.
+5. The LLM agent compiles the already-prepared source material into wiki pages.
+6. The CLI records structured logs/session bookkeeping and moves processed sources to `llm_wiki/raw`.
 7. The agent reports changes, contradictions, unresolved issues, and follow-ups to the user.
 
 ## Canonical State
@@ -159,28 +159,44 @@ The product should move from document-type-first organization toward connector-f
 Recommended future layout:
 
 ```text
-llm_wiki/
+project-root/
   sources.yaml
-  inbox/
-    youtube/
-    substack/
-    apple-notes/
-    manual/
-  raw/
-    youtube/
-    substack/
-    apple-notes/
-    manual/
-  pageindex/
-    youtube/
-    substack/
-    apple-notes/
-    manual/
-  .llmkb/
-    state/
-      sources/
-    reports/
-    runs/
+  llm_wiki/
+    inbox/
+      youtube/
+      substack/
+      apple-notes/
+      manual/
+    raw/
+      youtube/
+      substack/
+      apple-notes/
+      manual/
+    pageindex/
+      youtube/
+      substack/
+      apple-notes/
+      manual/
+    .llmkb/
+      state/
+        sources/
+      reports/
+      runs/
+      logs/
+  .opencode/
+    skills/
+      process-inbox/
+      answer/
+      ...
+    agents/
+      inbox-processor-instructions.md
+  .claude/
+    skills/
+      process-inbox/
+      answer/
+      ...
+    agents/
+      inbox-processor-instructions.md
 ```
 
 The existing `inbox/transcripts`, `inbox/articles`, `raw/transcripts`, `raw/articles`, and similar folders can be migrated later. Migration should be documented separately from product behavior.
@@ -207,6 +223,8 @@ Default thresholds:
 Both thresholds must be configurable.
 
 Long document detection should not alter the source lifecycle by itself. It should populate `pageindex.required` and then run PageIndex if requested by the command.
+
+As of the inbox pipeline hardening sprint, `cogforge inbox run` calls the same preparation logic internally before every agent spawn. Skills should not ask spawned agents to run `inbox prepare`; the agent should treat the source as already prepared and consume any PageIndex artifact paths or preparation metadata passed in the prompt/report.
 
 ## LLM Responsibilities
 
@@ -237,7 +255,29 @@ The CLI should own:
 - Session file creation or update.
 - Structural validation.
 - Machine-readable run reports.
+- Per-source preparation before every `inbox run` agent spawn.
+- Structured file logging under `.llmkb/logs/YYYY-MM-DD.log` for operational debugging.
 - Rendering reports to Markdown on request.
+
+## Agent Skills
+
+Cogforge distributes companion agent skills as part of the software package.
+
+Canonical skills are packaged inside the wheel and auto-synced into the local project on every Cogforge command:
+
+- `process-inbox`
+- `answer`
+- `create-synthesis`
+- `lint-wiki`
+- `log-change`
+- `persist-decision`
+- `session-memory`
+- `update-domain-context`
+- `youtube-transcript`
+
+Skills are managed software assets. The local copies in `.opencode/skills/` and `.claude/skills/` are overwritten on every sync. Do not edit them locally; they are not user configuration.
+
+Agent prompt assets (e.g. `inbox-processor-instructions.md`) are also managed and synced.
 
 ## Reports
 

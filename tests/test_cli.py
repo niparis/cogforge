@@ -164,14 +164,14 @@ class TestCLIInvocation:
         result = _run(["version"], wiki_root=wiki)
         assert result.returncode == 0
         data = json.loads(result.stdout)
-        assert data == {"version": "0.1.5"}
+        assert data == {"version": "0.1.6"}
 
     def test_version_command_markdown_format(self, tmp_path: Path) -> None:
         wiki = _make_wiki(tmp_path)
         result = _run(["--format", "markdown", "version"], wiki_root=wiki)
         assert result.returncode == 0
         assert "# cogforge version" in result.stdout
-        assert "**Version:** 0.1.5" in result.stdout
+        assert "**Version:** 0.1.6" in result.stdout
 
     def test_invalid_args_return_nonzero(self, tmp_path: Path) -> None:
         wiki = _make_wiki(tmp_path)
@@ -743,3 +743,82 @@ class TestForceRefresh:
 
         assert processed == []
         assert result.skipped_count == 1
+
+
+
+class TestSkillsSync:
+    """Tests for cogforge skills command and auto-sync."""
+
+    def test_skills_command_creates_opencode_and_claude_skills(self, tmp_path: Path) -> None:
+        """cogforge skills should copy canonical skills into .opencode/skills and .claude/skills."""
+        wiki = _make_wiki(tmp_path)
+        result = _run(["skills"], wiki_root=wiki)
+        assert result.returncode == 0, f"stderr={result.stderr}"
+        data = json.loads(result.stdout)
+        synced = data.get("synced", [])
+        agents = {item["agent"] for item in synced if item["type"] == "skill"}
+        assert "opencode" in agents
+        assert "claude" in agents
+        # Verify files exist
+        assert (wiki.parent / ".opencode" / "skills" / "process-inbox" / "SKILL.md").exists()
+        assert (wiki.parent / ".claude" / "skills" / "process-inbox" / "SKILL.md").exists()
+
+    def test_skills_check_detects_missing(self, tmp_path: Path) -> None:
+        """--check should report missing skills before sync."""
+        wiki = _make_wiki(tmp_path)
+        result = _run(["skills", "--check"], wiki_root=wiki)
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert data["ok"] is False
+        assert len(data["missing"]) > 0
+
+    def test_skills_check_ok_after_sync(self, tmp_path: Path) -> None:
+        """After sync, --check should report OK."""
+        wiki = _make_wiki(tmp_path)
+        _run(["skills"], wiki_root=wiki)
+        result = _run(["skills", "--check"], wiki_root=wiki)
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert data["ok"] is True
+        assert data["missing"] == []
+        assert data["stale"] == []
+
+    def test_skills_dry_run_does_not_write(self, tmp_path: Path) -> None:
+        """--dry-run should report but not create files."""
+        wiki = _make_wiki(tmp_path)
+        result = _run(["skills", "--dry-run"], wiki_root=wiki)
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert len(data["synced"]) > 0
+        assert not (wiki.parent / ".opencode" / "skills" / "process-inbox" / "SKILL.md").exists()
+
+    def test_skills_agent_filter(self, tmp_path: Path) -> None:
+        """--agent opencode should only sync opencode skills."""
+        wiki = _make_wiki(tmp_path)
+        result = _run(["skills", "--agent", "opencode"], wiki_root=wiki)
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        agents = {item["agent"] for item in data["synced"]}
+        assert agents == {"opencode"}
+        assert not (wiki.parent / ".claude" / "skills").exists()
+
+    def test_init_creates_skills(self, tmp_path: Path) -> None:
+        """cogforge init should sync skills into the initialized project."""
+        target = tmp_path / "project"
+        target.mkdir()
+        result = _run(["init"], wiki_root=target / "llm_wiki", cwd=target)
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        created = data.get("created_or_updated", [])
+        # Should include skill paths
+        skill_paths = [c for c in created if ".opencode/skills" in c or ".claude/skills" in c]
+        assert len(skill_paths) > 0
+
+    def test_canonical_skills_are_packaged(self) -> None:
+        """All canonical skills must be discoverable via importlib.resources."""
+        from importlib.resources import as_file, files
+        from cogforge.skills_sync import _CANONICAL_SKILL_NAMES
+        with as_file(files("cogforge.skills")) as root:
+            for name in _CANONICAL_SKILL_NAMES:
+                skill_file = root / name / "SKILL.md"
+                assert skill_file.exists(), f"Missing canonical skill: {name}"
