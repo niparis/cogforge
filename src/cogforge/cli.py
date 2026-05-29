@@ -28,6 +28,7 @@ from cogforge.paths import Paths, _encode_source_id, _decode_source_id, resolve_
 from cogforge.reports import Report, render_json, render_markdown, load_report, save_report
 from cogforge.sync import SyncResult, sync_substack
 from cogforge.sync_apple_notes import sync_apple_notes, AppleNotesSyncResult
+from cogforge.skills_sync import sync_skills, check_skills, _is_cogforge_repo
 from cogforge.sync_youtube import sync_youtube, YouTubeSyncResult
 from cogforge.prepare import PrepareResult, prepare_inbox_source
 from cogforge.state import (
@@ -220,7 +221,37 @@ class CogforgeGroup(click.Group):
         }
         if dotenv_files:
             logger.debug(f"Loaded .env from: {', '.join(str(p) for p in dotenv_files)}")
+
+        # Auto-sync skills if inside a Cogforge-managed repo
+        _maybe_sync_skills(wiki_root, quiet, verbose)
+
         return remaining
+
+
+def _maybe_sync_skills(wiki_root: Path, quiet: bool, verbose: bool) -> None:
+    """Silently sync canonical skills into the local agent directories."""
+    # Skills live at the project root, not inside llm_wiki
+    project_root = wiki_root.parent
+    if not _is_cogforge_repo(project_root):
+        return
+    # Avoid syncing on commands that handle it explicitly
+    import sys
+    args = sys.argv[1:]
+    if not args:
+        return
+    # Skip auto-sync for init and skills commands (accounting for global flags before subcommand)
+    subcommands = {"init", "skills"}
+    if any(arg in subcommands for arg in args):
+        return
+    try:
+        result = sync_skills(wiki_root, dry_run=False)
+        if verbose and result.get("synced"):
+            for item in result["synced"]:
+                logger.debug(f"synced {item['type']} {item['name']} → {item['dst']}")
+    except Exception:
+        # Never fail the main command because of skill sync issues
+        if verbose:
+            logger.debug("Skill sync failed (non-critical)")
 
 
 def _cli_ctx(ctx: click.Context) -> dict[str, Any]:
@@ -373,10 +404,17 @@ def init_cmd(ctx: click.Context, target: Path, force: bool) -> None:
         (wiki_root / rel).mkdir(parents=True, exist_ok=True)
     indexes = _ensure_wiki_indexes(wiki_root, force)
 
+    # Sync skills for all supported agents on init
+    try:
+        skill_result = sync_skills(project_root, agents=["opencode", "claude"], dry_run=False)
+        skill_synced = [item["dst"] for item in skill_result.get("synced", [])]
+    except Exception:
+        skill_synced = []
+
     result = {
         "project_root": str(project_root),
         "wiki_root": str(wiki_root),
-        "created_or_updated": copied + indexes,
+        "created_or_updated": copied + indexes + skill_synced,
         "force": force,
     }
     if output_format == "markdown":
@@ -1903,6 +1941,67 @@ def wiki_session_close(ctx: click.Context, report: Path) -> None:
             f"**Warnings:** {session_data['warnings']}",
             f"**File:** `{session_file}`",
         ]
+        click.echo("\n".join(lines))
+    else:
+        _echo_json(result)
+
+
+
+# ── skills ──────────────────────────────────────────────────────────────────
+
+@main.command("skills")
+@click.option("--check", is_flag=True, default=False, help="Report whether local skills match canonical versions without writing.")
+@click.option("--agent", type=click.Choice(["opencode", "claude", "all"]), default="all", help="Agent target to sync.")
+@click.pass_context
+def skills_cmd(ctx: click.Context, check: bool, agent: str) -> None:
+    """Sync canonical Cogforge skills into the local project agent directories.
+
+    Skills are part of the Cogforge software and are managed, not user-edited.
+    Auto-sync runs silently on every cogforge command inside a Cogforge repo.
+    """
+    c = _cli_ctx(ctx)
+    wiki_root = c.get("wiki_root", Path.cwd())
+    project_root = wiki_root.parent
+    dry_run = c.get("dry_run", False)
+
+    if not _is_cogforge_repo(project_root):
+        fail("Not inside a Cogforge-managed repository. Run cogforge init first.")
+
+    agents = ["opencode", "claude"] if agent == "all" else [agent]
+
+    if check:
+        report = check_skills(project_root)
+        if c.get("output_format") == "markdown":
+            lines = ["# cogforge skills --check", ""]
+            if report["ok"]:
+                lines.append("**Status:** OK — all skills up to date.")
+            else:
+                lines.append("**Status:** STALE or MISSING")
+                if report["missing"]:
+                    lines.append(f"**Missing:** {len(report['missing'])}")
+                    for m in report["missing"]:
+                        lines.append(f"- {m['agent']}/{m['name']}")
+                if report["stale"]:
+                    lines.append(f"**Stale:** {len(report['stale'])}")
+                    for s in report["stale"]:
+                        lines.append(f"- {s['agent']}/{s['name']}")
+            click.echo("\n".join(lines))
+        else:
+            _echo_json(report)
+        return
+
+    result = sync_skills(project_root, agents=agents, dry_run=dry_run)
+    if c.get("output_format") == "markdown":
+        lines = ["# cogforge skills", ""]
+        if dry_run:
+            lines.append("**Dry run** — no files written.")
+        lines.append(f"**Synced:** {len(result['synced'])}")
+        for item in result["synced"]:
+            lines.append(f"- {item['agent']} {item['type']} `{item['name']}` → {item['dst']}")
+        if result["errors"]:
+            lines.append(f"**Errors:** {len(result['errors'])}")
+            for e in result["errors"]:
+                lines.append(f"- {e}")
         click.echo("\n".join(lines))
     else:
         _echo_json(result)

@@ -355,6 +355,32 @@ cogforge reports render PATH --format markdown
 | 2 | Validation failed |
 | 3 | Partial success (some sources failed) |
 
+## `cogforge skills`
+
+Sync canonical Cogforge agent skills into the local project.
+
+```bash
+cogforge skills                    # sync all skills for all agents
+cogforge skills --check            # report missing or stale skills
+cogforge skills --agent opencode   # sync only opencode skills
+cogforge skills --agent claude     # sync only claude skills
+cogforge skills --dry-run          # show what would change without writing
+```
+
+Skills are part of the Cogforge software package and are managed, not user-edited. On every `cogforge` command inside a Cogforge-managed repository, skills are auto-synced silently. Explicit `cogforge skills` is useful for:
+
+- Initial setup after `cogforge init`
+- Checking whether local skills are up to date (`--check`)
+- Previewing sync changes (`--dry-run`)
+
+Supported agents: `opencode`, `claude`.
+
+| Option | Description |
+|--------|-------------|
+| `--check` | Report whether local skills match canonical versions. No writes. |
+| `--agent` | Sync only one agent (`opencode`, `claude`, or `all`). |
+| `--dry-run` | Show what would be copied without writing files. |
+
 ## Typical Agent Workflow
 
 An agent processes one source end-to-end:
