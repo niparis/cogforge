@@ -29,6 +29,7 @@ from cogforge.reports import Report, render_json, render_markdown, load_report, 
 from cogforge.sync import SyncResult, sync_substack
 from cogforge.sync_apple_notes import sync_apple_notes, AppleNotesSyncResult
 from cogforge.sync_youtube import sync_youtube, YouTubeSyncResult
+from cogforge.prepare import PrepareResult, prepare_inbox_source
 from cogforge.state import (
     SourceState, SourceStatus, encode_source_id, decode_source_id,
     list_source_states, load_state, save_state, validate_state,
@@ -40,6 +41,15 @@ class ExitCode:
     COMMAND_ERROR = 1
     VALIDATION_FAILED = 2
     PARTIAL_SUCCESS = 3
+
+
+def _log_result(cmd_name: str, result: dict[str, Any], duration_ms: int) -> None:
+    """Log a structured JSON result line to the configured loguru file sink."""
+    logger.info(json.dumps({
+        "command": cmd_name,
+        "result": result,
+        "duration_ms": duration_ms,
+    }))
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -494,6 +504,10 @@ def config_group(ctx: click.Context) -> None:
 @click.pass_context
 def config_validate(ctx: click.Context) -> None:
     """Validate sources.yaml configuration."""
+    import time
+    start_time = time.time()
+    import time
+    start_time = time.time()
     c = _cli_ctx(ctx)
     config = c["config"]
     paths = c["paths"]
@@ -1308,6 +1322,8 @@ def inbox_run(ctx: click.Context, max_items: int | None, delay: float, cli_overr
         1  agent failure (non-rate-limit) or no agents configured
         3  fallback list exhausted (all agents rate-limited)
     """
+    import time
+    start_time = time.time()
     c = _cli_ctx(ctx)
     config = c["config"]
     agents = list(config.agents)
@@ -1329,6 +1345,7 @@ def inbox_run(ctx: click.Context, max_items: int | None, delay: float, cli_overr
     report = run_loop(
         paths=c["paths"],
         agents=agents,
+        config=c["config"],
         max_items=max_items,
         delay_seconds=delay,
         dry_run=c["dry_run"],
@@ -1337,6 +1354,15 @@ def inbox_run(ctx: click.Context, max_items: int | None, delay: float, cli_overr
     )
 
     payload = report.to_dict()
+
+    # Log structured result
+    import time
+    _log_result("inbox run", payload, int((time.time() - start_time) * 1000))
+
+    # Also write to --report PATH if given
+    report_path = c.get("report_path")
+    if report_path:
+        report_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
 
     if c["output_format"] == "markdown":
         lines = ["# cogforge inbox run", "", f"**Result:** {report.result.value}",
@@ -1447,157 +1473,48 @@ def inbox_prepare(ctx: click.Context, source_id: str, no_pageindex: bool, force_
     paths = c["paths"]
     config = c["config"]
     output_format = c["output_format"]
-    state_dir = paths.state_sources
 
-    state = load_state(state_dir, source_id)
-    if state is None:
-        fail(f"State file not found for source: {source_id}")
+    result = prepare_inbox_source(
+        source_id=source_id,
+        paths=paths,
+        config=config,
+        no_pageindex=no_pageindex,
+        force_pageindex=force_pageindex,
+        char_threshold=char_threshold,
+        page_threshold=page_threshold,
+        no_pdf_enrich=no_pdf_enrich,
+        force_pdf_enrich=force_pdf_enrich,
+        allow_missing_vlm_key=allow_missing_vlm_key,
+    )
 
-    source_folder_name = None
-    if state.paths.inbox:
-        source_folder_name = Path(state.paths.inbox).name
+    if not result.package_valid:
+        fail(f"Source package invalid: {', '.join(result.package_issues)}")
+    if result.pdf_enrich_status == "failed":
+        hints = result.pdf_enrich_details.get("hints", [])
+        msg = "; ".join(hints) if hints else result.pdf_enrich_details.get("error", "unknown error")
+        fail(f"PDF enrichment failed: {msg}")
 
-    inbox_folder = paths.inbox / state.connector / source_folder_name if source_folder_name else None
-
-    package_valid = True
-    package_issues = []
-    if inbox_folder and not inbox_folder.is_dir():
-        package_valid = False
-        package_issues.append(f"inbox folder not found: {state.paths.inbox}")
-    elif inbox_folder:
-        index_md = inbox_folder / "index.md"
-        if not index_md.is_file():
-            package_valid = False
-            package_issues.append("index.md not found in inbox folder")
-
-    # ── PDF enrichment (pdf connector only, before PageIndex) ────────────────
-    pdf_enrich_result: dict | None = None
-    if state.connector == "pdf" and not no_pdf_enrich and inbox_folder and inbox_folder.is_dir():
-        # Fail fast if the VLM API key is missing — otherwise the pipeline silently
-        # produces FAILED visual.md files for every page, which is invisible until
-        # the user reads summary.md after the fact.
-        env_problems = _check_required_env(config)
-        if env_problems and not allow_missing_vlm_key:
-            fail(
-                "PDF enrichment requires a VLM API key but it is not set in the environment. "
-                + " ".join(p["hint"] for p in env_problems)
-                + " Pass --allow-missing-vlm-key to proceed text-only (visual pages will be SKIPPED), "
-                  "or --no-pdf-enrich to skip enrichment entirely.",
-            )
-
-        from cogforge.pdf_preprocess import ingest_pdf, PDFPreprocessConfig
-        from cogforge.pdf_preprocess.config import VLMConfig
-
-        source_file = _read_frontmatter(inbox_folder / "index.md").get("source_file")
-        pdf_path = paths.papers / source_file if source_file else None
-        enriched_dir = inbox_folder / "enriched"
-        already_done = enriched_dir.is_dir() and not force_pdf_enrich
-
-        if already_done:
-            pdf_enrich_result = {"status": "skipped", "reason": "already enriched"}
-        elif not pdf_path or not pdf_path.exists():
-            logger.warning(f"PDF file not found for {source_id}: {source_file!r}")
-            pdf_enrich_result = {"status": "skipped", "reason": f"pdf not found: {source_file}"}
-        else:
-            try:
-                pdf_cfg = config.pdf_preprocess
-                # If the user passed --allow-missing-vlm-key and the key is indeed
-                # missing, run the pipeline with VLM disabled so visual pages get
-                # SKIPPED_DISABLED instead of FAILED placeholders.
-                vlm_enabled = not bool(env_problems and allow_missing_vlm_key)
-                cfg = PDFPreprocessConfig(
-                    vlm=VLMConfig(
-                        enabled=vlm_enabled,
-                        model=pdf_cfg.vlm_model,
-                        base_url=pdf_cfg.vlm_base_url,
-                        api_key_env=pdf_cfg.vlm_api_key_env,
-                    ),
-                    force=force_pdf_enrich,
-                )
-                manifest = ingest_pdf(pdf_path, inbox_folder, cfg)
-                enriched_md = enriched_dir / f"{manifest.document_id}.enriched.md"
-                shutil.copy(enriched_md, inbox_folder / "index.md")
-                state.content.estimated_chars = sum(p.text_chars for p in manifest.pages)
-                state.content.estimated_pages = manifest.page_count
-                save_state(state_dir, state)
-                pdf_enrich_result = {"status": "success", "pages": manifest.page_count, "pdf_path": str(pdf_path)}
-            except Exception as exc:
-                logger.error(f"PDF enrichment failed for {source_id}: {exc}")
-                pdf_enrich_result = {"status": "failed", "error": str(exc)}
-
-    is_long = False
-    if not no_pageindex:
-        is_long = detect_long_document(state, config, char_threshold, page_threshold)
-
-    pageindex_result = None
-    if is_long and not no_pageindex:
-        pageindex_result = run_pageindex(
-            state, paths, config,
-            force=force_pageindex,
-            char_override=char_threshold,
-            page_override=page_threshold,
-        )
-        state.pageindex.required = is_long
-        state.pageindex.status = pageindex_result.status
-        state.pageindex.artifact_path = pageindex_result.artifact_path
-        state.pageindex.error = pageindex_result.error
-        save_state(state_dir, state)
-
-    result = {
-        "source_id": source_id,
-        "connector": state.connector,
-        "status": state.status,
-        "package_valid": package_valid,
-        "long_document_detected": is_long,
-        "pageindex_required": is_long,
-    }
-
-    if package_issues:
-        result["package_issues"] = package_issues
-
-    if pdf_enrich_result:
-        result["pdf_enrich"] = pdf_enrich_result
-
-    if pageindex_result:
-        result["pageindex"] = {
-            "status": pageindex_result.status,
-            "artifact_path": pageindex_result.artifact_path,
-            "error": pageindex_result.error,
-            "page_count": pageindex_result.page_count,
-        }
-
-    if state.paths.inbox:
-        result["inbox_path"] = state.paths.inbox
-
+    data = result.to_dict()
     if output_format == "markdown":
         lines = [f"# Prepare: {source_id}", ""]
-        lines.append(f"- **connector:** {state.connector}")
-        lines.append(f"- **status:** {state.status}")
-        lines.append(f"- **package valid:** {'yes' if package_valid else 'no'}")
-        for issue in package_issues:
+        lines.append(f"- **connector:** {data.get('connector', 'unknown')}")
+        lines.append(f"- **package valid:** {'yes' if result.package_valid else 'no'}")
+        for issue in result.package_issues:
             lines.append(f"  - {issue}")
-        if pdf_enrich_result:
-            lines.append(f"- **pdf enrich:** {pdf_enrich_result.get('status')}")
-            if pdf_enrich_result.get("pages"):
-                lines.append(f"  - pages: {pdf_enrich_result['pages']}")
-            if pdf_enrich_result.get("error"):
-                lines.append(f"  - error: {pdf_enrich_result['error']}")
-            if pdf_enrich_result.get("reason"):
-                lines.append(f"  - reason: {pdf_enrich_result['reason']}")
-        lines.append(f"- **long document:** {'yes' if is_long else 'no'}")
-        if pageindex_result:
-            lines.append(f"- **pageindex status:** {pageindex_result.status}")
-            if pageindex_result.artifact_path:
-                lines.append(f"  - artifacts: `{pageindex_result.artifact_path}`")
-            if pageindex_result.error:
-                lines.append(f"  - error: {pageindex_result.error}")
-        if state.paths.inbox:
-            lines.append(f"- **inbox path:** `{state.paths.inbox}`")
-            if state.paths.raw:
-                lines.append(f"- **raw path:** `{state.paths.raw}`")
+        if result.pdf_enrich_status:
+            lines.append(f"- **pdf enrich:** {result.pdf_enrich_status}")
+            for k, v in result.pdf_enrich_details.items():
+                lines.append(f"  - {k}: {v}")
+        lines.append(f"- **long document:** {'yes' if result.long_document_detected else 'no'}")
+        if result.pageindex_status:
+            lines.append(f"- **pageindex status:** {result.pageindex_status}")
+            if result.pageindex_artifact_path:
+                lines.append(f"  - artifacts: `{result.pageindex_artifact_path}`")
+            if result.pageindex_error:
+                lines.append(f"  - error: {result.pageindex_error}")
         click.echo("\n".join(lines))
     else:
-        _echo_json(result)
+        _echo_json(data)
 
 
 # ── pageindex ────────────────────────────────────────────────────────────────
