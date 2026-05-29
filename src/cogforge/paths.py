@@ -29,6 +29,10 @@ class Paths:
         return self.root / ".llmkb" / "reports"
 
     @property
+    def logs(self) -> Path:
+        return self.root / ".llmkb" / "logs"
+
+    @property
     def history(self) -> Path:
         return self.root / "history"
 
@@ -67,6 +71,7 @@ class Paths:
             self.pageindex,
             self.state_sources,
             self.reports,
+            self.logs,
             self.history,
             self.history_sessions,
             self.wiki,

@@ -48,7 +48,7 @@ def _make_wiki(tmp: Path) -> Path:
 
 
 def _seed_inbox(wiki: Path, ids: list[str], connector: str = "test") -> None:
-    """Create N inbox state files with status='inbox'."""
+    """Create N inbox state files with status='inbox' and minimal folder structure."""
     state_dir = wiki / ".llmkb" / "state" / "sources"
     for sid in ids:
         state = SourceState(
@@ -60,6 +60,10 @@ def _seed_inbox(wiki: Path, ids: list[str], connector: str = "test") -> None:
             paths=SourcePaths(inbox=f"inbox/{connector}/{sid}"),
         )
         save_state(state_dir, state)
+        # Create minimal inbox folder so prepare_inbox_source passes validation
+        inbox_dir = wiki / "inbox" / connector / sid
+        inbox_dir.mkdir(parents=True, exist_ok=True)
+        (inbox_dir / "index.md").write_text("# " + sid + "\n\nTest content.\n")
 
 
 def _write_sources_yaml(wiki: Path, agents: list[dict]) -> None:
@@ -227,7 +231,7 @@ class TestBuildCommand:
 class TestRunLoop:
     def test_no_agents_returns_no_agents(self, tmp_path: Path):
         wiki = _make_wiki(tmp_path)
-        report = run_loop(Paths(wiki), agents=[])
+        report = run_loop(Paths(wiki), agents=[], config=None)
         assert report.result == LoopResult.NO_AGENTS
 
     def test_dry_run_does_not_invoke(self, tmp_path: Path, fake_path: Path):
@@ -239,6 +243,7 @@ class TestRunLoop:
         report = run_loop(
             Paths(wiki),
             agents=[AgentConfig(cli="claude")],
+            config=None,
             dry_run=True,
         )
         assert report.result == LoopResult.DRY_RUN
@@ -250,7 +255,7 @@ class TestRunLoop:
         wiki = _make_wiki(tmp_path)
         _make_fake_agent(fake_path, "claude", behavior="fail", wiki_root=wiki)
 
-        report = run_loop(Paths(wiki), agents=[AgentConfig(cli="claude")])
+        report = run_loop(Paths(wiki), agents=[AgentConfig(cli="claude")], config=None)
         assert report.result == LoopResult.INBOX_EMPTY
         assert report.items_processed == 0
         assert report.items_attempted == 0
@@ -263,6 +268,7 @@ class TestRunLoop:
         report = run_loop(
             Paths(wiki),
             agents=[AgentConfig(cli="claude", timeout_seconds=10)],
+            config=None,
             delay_seconds=0,
         )
         assert report.result == LoopResult.SUCCESS
@@ -282,6 +288,7 @@ class TestRunLoop:
                 AgentConfig(cli="claude", timeout_seconds=10),
                 AgentConfig(cli="opencode", timeout_seconds=10),
             ],
+            config=None,
             delay_seconds=0,
         )
         assert report.result == LoopResult.SUCCESS
@@ -299,6 +306,7 @@ class TestRunLoop:
         report = run_loop(
             Paths(wiki),
             agents=[AgentConfig(cli="claude", timeout_seconds=10)],
+            config=None,
             delay_seconds=0,
         )
         assert report.result == LoopResult.AGENT_FAILURE
@@ -318,6 +326,7 @@ class TestRunLoop:
                 AgentConfig(cli="claude", timeout_seconds=10),
                 AgentConfig(cli="opencode", timeout_seconds=10),
             ],
+            config=None,
             delay_seconds=0,
         )
         assert report.result == LoopResult.ALL_RATE_LIMITED
@@ -332,6 +341,7 @@ class TestRunLoop:
         report = run_loop(
             Paths(wiki),
             agents=[AgentConfig(cli="claude", timeout_seconds=10)],
+            config=None,
             max_items=2,
             delay_seconds=0,
         )
@@ -347,6 +357,7 @@ class TestRunLoop:
         report = run_loop(
             Paths(wiki),
             agents=[AgentConfig(cli="claude", timeout_seconds=10)],
+            config=None,
             delay_seconds=0,
         )
         assert report.result == LoopResult.AGENT_FAILURE

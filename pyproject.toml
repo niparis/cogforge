@@ -1,6 +1,6 @@
 [project]
 name = "cogforge"
-version = "0.1.5"
+version = "0.1.6"
 description = "Agent-facing CLI for maintaining the LLM wiki"
 readme = "README.md"
 requires-python = ">=3.11"

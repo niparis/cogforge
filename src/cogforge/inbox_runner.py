@@ -29,7 +29,8 @@ from typing import Any
 
 from cogforge.config import AgentConfig
 from cogforge.paths import Paths
-from cogforge.state import SourceState, SourceStatus, list_source_states
+from cogforge.prepare import PrepareResult, prepare_inbox_source
+from cogforge.state import SourceState, SourceStatus, list_source_states, save_state
 
 
 # Per-item prompt template. The runner pre-selects the source and injects its
@@ -39,6 +40,8 @@ from cogforge.state import SourceState, SourceStatus, list_source_states
 PROMPT_TEMPLATE = (
     "Process inbox source {source_id} ({connector}) at path "
     "{inbox_path} using the /process-inbox skill. "
+    "The source has already been pre-validated and prepared by cogforge. "
+    "Estimated chars: {estimated_chars}. PageIndex required: {pageindex_required}. "
     "Stop after this single source."
 )
 
@@ -116,6 +119,7 @@ class LoopReport:
     # Per-item structured results (source_id, pages_created, etc.) — populated
     # for claude agents where stdout is captured; empty for opencode.
     items_detail: list[dict[str, Any]] = field(default_factory=list)
+    prepare_results: list[dict[str, Any]] = field(default_factory=list)
     # Dry-run payload
     pending_count: int | None = None
     planned_command: list[str] | None = None
@@ -133,6 +137,8 @@ class LoopReport:
             out["total_usage"] = self.total_usage.to_dict()
         if self.items_detail:
             out["items_detail"] = self.items_detail
+        if self.prepare_results:
+            out["prepare_results"] = self.prepare_results
         if self.pending_count is not None:
             out["pending_count"] = self.pending_count
         if self.planned_command is not None:
@@ -413,6 +419,7 @@ def _extract_json_report(text: str) -> dict[str, Any] | None:
 def run_loop(
     paths: Paths,
     agents: list[AgentConfig],
+    config=None,
     *,
     max_items: int | None = None,
     delay_seconds: float = 2.0,
@@ -445,6 +452,8 @@ def run_loop(
             source_id="<source_id>",
             connector="<connector>",
             inbox_path="<inbox_path>",
+            estimated_chars=0,
+            pageindex_required="no",
         )
         return LoopReport(
             result=LoopResult.DRY_RUN,
@@ -532,10 +541,47 @@ def run_loop(
 
         # Build a per-item prompt that names the specific source so the agent
         # skips the inbox-discovery dance.
+        # Force prepare before spawning agent
+        from loguru import logger
+        from cogforge.config import Config
+        effective_config = config if config is not None else Config()
+        prepare_result = prepare_inbox_source(
+            next_source.id, paths, effective_config,
+            no_pageindex=False,
+            no_pdf_enrich=False,
+        )
+        logger.info(json.dumps({
+            "phase": "prepare",
+            "source_id": next_source.id,
+            "package_valid": prepare_result.package_valid,
+            "long_document": prepare_result.long_document_detected,
+        }))
+
+        if not prepare_result.package_valid:
+            failures.append({
+                "attempt": items_attempted,
+                "agent_index": agent_idx,
+                "agent_cli": "prepare",
+                "returncode": 1,
+                "reason": f"Package invalid: {', '.join(prepare_result.package_issues)}",
+            })
+            # Mark source as failed so we don't retry it infinitely
+            next_source.status = SourceStatus.FAILED.value
+            save_state(paths.state_sources, next_source)
+            items_detail.append({
+                "source_id": next_source.id,
+                "connector": next_source.connector,
+                "prepare_failed": True,
+                "prepare_issues": prepare_result.package_issues,
+            })
+            continue
+
         prompt = PROMPT_TEMPLATE.format(
             source_id=next_source.id,
             connector=next_source.connector,
             inbox_path=next_source.paths.inbox or "(no inbox path)",
+            estimated_chars=next_source.content.estimated_chars or 0,
+            pageindex_required="yes" if prepare_result.long_document_detected else "no",
         )
         cmd = _build_command(agent, prompt)
         rc, out, err, item_usage = _invoke(cmd, agent.timeout_seconds, verbose, cwd=cwd)
