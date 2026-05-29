@@ -273,7 +273,8 @@ Canonical skills are packaged inside the wheel and auto-synced into the local pr
 - `persist-decision`
 - `session-memory`
 - `update-domain-context`
-- `youtube-transcript`
+
+Obsolete skills are automatically removed. For example, `youtube-transcript` was previously a skill but is now handled entirely by `cogforge sync youtube`.
 
 Skills are managed software assets. The local copies in `.opencode/skills/` and `.claude/skills/` are overwritten on every sync. Do not edit them locally; they are not user configuration.
 

@@ -32,6 +32,9 @@ _CANONICAL_SKILL_NAMES = [
     "process-inbox",
     "session-memory",
     "update-domain-context",
+]
+
+_OBSOLETE_SKILL_NAMES = [
     "youtube-transcript",
 ]
 
@@ -71,12 +74,12 @@ def sync_skills(
         dry_run: if True, compute what would change without writing.
 
     Returns:
-        dict with keys: synced (list of dicts), skipped (list), errors (list)
+        dict with keys: synced (list of dicts), removed (list), errors (list)
     """
     if agents is None:
         agents = list(_AGENT_TARGETS.keys())
 
-    result: dict[str, Any] = {"synced": [], "skipped": [], "errors": []}
+    result: dict[str, Any] = {"synced": [], "removed": [], "errors": []}
 
     with as_file(files("cogforge.skills")) as skill_root:
         for agent in agents:
@@ -102,6 +105,19 @@ def sync_skills(
                     "name": name,
                     "dst": str(dst.relative_to(project_root)),
                 })
+
+            # Remove obsolete skills
+            for name in _OBSOLETE_SKILL_NAMES:
+                obsolete_dir = skills_dst / name
+                if obsolete_dir.exists():
+                    if not dry_run:
+                        shutil.rmtree(obsolete_dir)
+                    result["removed"].append({
+                        "agent": agent,
+                        "type": "skill",
+                        "name": name,
+                        "dst": str(obsolete_dir.relative_to(project_root)),
+                    })
 
             # Copy agent prompt assets
             agents_dst = project_root / cfg["agents_dir"]
@@ -142,6 +158,13 @@ def check_skills(project_root: Path) -> dict[str, Any]:
                     missing.append({"agent": agent, "name": name})
                     ok = False
                 elif src.exists() and src.read_bytes() != dst.read_bytes():
+                    stale.append({"agent": agent, "name": name})
+                    ok = False
+
+            # Obsolete skills present locally count as stale
+            for name in _OBSOLETE_SKILL_NAMES:
+                obsolete_dir = skills_dst / name
+                if obsolete_dir.exists():
                     stale.append({"agent": agent, "name": name})
                     ok = False
 

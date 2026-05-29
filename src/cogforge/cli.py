@@ -1998,6 +1998,10 @@ def skills_cmd(ctx: click.Context, check: bool, agent: str) -> None:
         lines.append(f"**Synced:** {len(result['synced'])}")
         for item in result["synced"]:
             lines.append(f"- {item['agent']} {item['type']} `{item['name']}` → {item['dst']}")
+        if result["removed"]:
+            lines.append(f"**Removed:** {len(result['removed'])}")
+            for item in result["removed"]:
+                lines.append(f"- {item['agent']} {item['type']} `{item['name']}` → {item['dst']}")
         if result["errors"]:
             lines.append(f"**Errors:** {len(result['errors'])}")
             for e in result["errors"]:
