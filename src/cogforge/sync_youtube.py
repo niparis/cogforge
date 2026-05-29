@@ -443,8 +443,8 @@ def sync_youtube(
             result.errors.append(f"Could not extract video ID from: {url}")
             return result
 
-    # Case 2: All configured YouTube sources
-    elif all_sources:
+    # Case 2: All configured YouTube sources (default when no specific selector given)
+    elif all_sources or not source_id:
         for src in config.sources.get("youtube", []):
             if not src.id or not src.enabled:
                 continue
